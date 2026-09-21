@@ -370,6 +370,64 @@ namespace esphome
             return str;
         }
 
+        // Decode the operating mode used by COM2 CMD53.
+        optional<NonNasaMode> decode_com2_mode(uint8_t value)
+        {
+            switch (value)
+            {
+            case 0x00:
+                return NonNasaMode::Auto;
+            case 0x01:
+                return NonNasaMode::Cool;
+            case 0x02:
+                return NonNasaMode::Dry;
+            case 0x03:
+                return NonNasaMode::Fan;
+            case 0x04:
+                return NonNasaMode::Heat;
+            default:
+                return {};
+            }
+        }
+
+        // Decode the operating mode from CMD52 B4 after removing its confirmed power bit.
+        optional<NonNasaMode> decode_com2_state_mode(uint8_t value)
+        {
+            switch (value & 0x7F)
+            {
+            case 0x01:
+                return NonNasaMode::Heat;
+            case 0x02:
+                return NonNasaMode::Cool;
+            case 0x04:
+                return NonNasaMode::Dry;
+            case 0x08:
+                return NonNasaMode::Fan;
+            case 0x22:
+                return NonNasaMode::Auto;
+            default:
+                return {};
+            }
+        }
+
+        // Decode the four manual fan speeds observed in COM2 CMD52.
+        optional<uint8_t> decode_com2_fanspeed(uint8_t value)
+        {
+            switch (value)
+            {
+            case 0xFA:
+                return 1;
+            case 0xFC:
+                return 2;
+            case 0xFD:
+                return 3;
+            case 0xF8:
+                return 4;
+            default:
+                return {};
+            }
+        }
+
         DecodeResult NonNasaDataPacket::decode(std::vector<uint8_t> &data)
         {
             // Stream-safe: wait until we have at least 14 bytes
@@ -420,6 +478,29 @@ namespace esphome
                     command20.wind_direction = NonNasaWindDirection::Stop;
 
                 return {DecodeResultType::Processed, 14};
+
+            case NonNasaCommand::Cmd52:
+            {
+                // CMD52 reports the current COM2 settings from the indoor unit.
+                command52.target_temp = (float)data[4] - 0x37;
+            
+                // Decode the four manual fan levels observed in payload byte B3.
+                command52.fanspeed = decode_com2_fanspeed(data[7]);
+            
+                // Payload byte B4 contains both the current operating mode and power state.
+                command52.mode = decode_com2_state_mode(data[8]);
+                command52.power = data[8] & 0x80;
+            
+                return {DecodeResultType::Processed, 14};
+            }
+            
+            case NonNasaCommand::Cmd53:
+            {
+                // CMD53 payload byte B7 reports the current COM2 operating mode.
+                command53.mode = decode_com2_mode(data[11]);
+            
+                return {DecodeResultType::Processed, 14};
+            }
 
             case NonNasaCommand::CmdC0:
                 commandC0.outdoor_unit_operation_mode = data[4];

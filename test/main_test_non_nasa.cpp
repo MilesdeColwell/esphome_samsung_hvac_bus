@@ -298,7 +298,43 @@ std::string packet_to_hex(std::vector<uint8_t> &data)
 {
     return bytes_to_hex(data);
 }
+// Test decoding of COM2 CMD52 and CMD53 status packets.
+void test_com2_status_decoding()
+{
+    std::cout << "test_com2_status_decoding" << std::endl;
 
+    // CMD52 reports the current COM2 setpoint, fan level, mode and power state.
+    auto cmd52 = build_packet(0x00, 0x00, 0x52, [](std::vector<uint8_t> &data) {
+        data[4] = 0x4D; // 22°C setpoint
+        data[7] = 0xFA; // Fan level 1
+        data[8] = 0x82; // Cool, power on
+    });
+
+    NonNasaDataPacket packet52;
+    auto result52 = packet52.decode(cmd52);
+
+    // Verify the known CMD52 values are decoded into their semantic state.
+    assert(result52.type == DecodeResultType::Processed);
+    assert(packet52.command52.target_temp == 22.0f);
+    assert(packet52.command52.fanspeed);
+    assert(*packet52.command52.fanspeed == 1);
+    assert(packet52.command52.mode);
+    assert(*packet52.command52.mode == NonNasaMode::Cool);
+    assert(packet52.command52.power == true);
+
+    // CMD53 reports the current COM2 operating mode using its own mode encoding.
+    auto cmd53 = build_packet(0x00, 0x00, 0x53, [](std::vector<uint8_t> &data) {
+        data[11] = 0x01; // Cool
+    });
+
+    NonNasaDataPacket packet53;
+    auto result53 = packet53.decode(cmd53);
+
+    // Verify CMD53 mode decoding independently from the CMD52 state encoding.
+    assert(result53.type == DecodeResultType::Processed);
+    assert(packet53.command53.mode);
+    assert(*packet53.command53.mode == NonNasaMode::Cool);
+}
 void test_previous_data_is_used_correctly()
 {
     // Sending package 20 on non nasa requiers to send the previous values
@@ -1975,6 +2011,8 @@ int main(int argc, char *argv[])
 {
     // test_read_file();
     test_decoding();
+    // Test decoding of COM2-specific status packets.
+    test_com2_status_decoding();    
     test_encoding();
     test_target();
 

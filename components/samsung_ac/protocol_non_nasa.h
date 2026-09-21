@@ -137,6 +137,19 @@ namespace esphome
             std::string to_string();
         };
 
+        struct NonNasaCommand52 // COM2 current state from indoor unit
+        {
+            float target_temp = 0;
+            optional<uint8_t> fanspeed; // Manual fan level 1-4
+            optional<NonNasaMode> mode;
+            bool power = false;
+        };
+        
+        struct NonNasaCommand53 // COM2 status from indoor unit
+        {
+            optional<NonNasaMode> mode;
+        };
+
         struct NonNasaCommandF3 // from outdoor unit
         {
             uint8_t inverter_max_frequency_hz = 0;
@@ -163,6 +176,8 @@ namespace esphome
         enum class NonNasaCommand : uint8_t
         {
             Cmd20 = 0x20,
+            Cmd52 = 0x52,
+            Cmd53 = 0x53,
             Cmd54 = 0x54,
             Cmd8D = 0x8d,
             CmdC0 = 0xc0,
@@ -188,6 +203,8 @@ namespace esphome
             union
             {
                 NonNasaCommand20 command20;
+                NonNasaCommand52 command52; // COM2 current state
+                NonNasaCommand53 command53; // COM2 status; includes operating mode
                 NonNasaCommandRaw command54; // Control message ack
                 NonNasaCommand8D command8D;
                 NonNasaCommandC0 commandC0;
