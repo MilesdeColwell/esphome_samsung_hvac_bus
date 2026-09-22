@@ -88,6 +88,9 @@ namespace esphome
         case FanMode::Auto:
           this->publish_state("Auto");
           break;
+        case FanMode::Unknown:
+        case FanMode::Off:
+          return;
         }
       }
 

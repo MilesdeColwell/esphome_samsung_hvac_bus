@@ -690,8 +690,8 @@ namespace esphome
 
             // Target temperature occupies the low five bits as the absolute Celsius value.
             float clamped_temp = target_temp;
-            if (clamped_temp < 16.0f)
-                clamped_temp = 16.0f;
+            if (clamped_temp < 18.0f)
+                clamped_temp = 18.0f;
             else if (clamped_temp > 30.0f)
                 clamped_temp = 30.0f;
 
@@ -1085,8 +1085,8 @@ namespace esphome
                 com2_tx_pending_ = true;
                 com2_tx_due_ms_ = millis() + COM2_TX_AFTER_D1_MS;
 
-                LOGD("COM2 D1 boundary detected; control TX scheduled in %u ms",
-                     COM2_TX_AFTER_D1_MS);
+                LOGD("COM2 D1 boundary detected; control TX scheduled in %lu ms",
+                     static_cast<unsigned long>(COM2_TX_AFTER_D1_MS));
             }
 
             target->register_address(nonpacket_.src);

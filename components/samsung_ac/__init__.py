@@ -588,7 +588,7 @@ async def to_code(config):
             conf[CONF_UNIT_OF_MEASUREMENT] = UNIT_CELSIUS
             conf[CONF_DEVICE_CLASS] = DEVICE_CLASS_TEMPERATURE
             num = await number.new_number(
-                conf, min_value=16.0, max_value=30.0, step=1.0
+                conf, min_value=18.0, max_value=30.0, step=1.0
             )
             cg.add(var_dev.set_target_temperature_number(num))
 
