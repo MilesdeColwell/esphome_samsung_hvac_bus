@@ -43,6 +43,10 @@ MULTI_CONF = False
 CONF_SAMSUNG_AC_ID = "samsung_ac_id"
 
 samsung_ac = cg.esphome_ns.namespace("samsung_ac")
+
+# Non-NASA indoor-unit bus type used for COM1/COM2 protocol selection.
+NonNasaBus = samsung_ac.enum("NonNasaBus", is_class=True)
+
 Samsung_AC = samsung_ac.class_("Samsung_AC", cg.PollingComponent, uart.UARTDevice)
 Samsung_AC_Device = samsung_ac.class_("Samsung_AC_Device")
 Samsung_AC_Switch = samsung_ac.class_("Samsung_AC_Switch", switch.Switch)
@@ -95,6 +99,14 @@ CONF_DEVICE_OUT_SENSOR_VOLTAGE = "outdoor_voltage"
 CONF_MAP_AUTO_TO_HEAT_COOL = "map_auto_to_heat_cool"
 CONF_DEBUG_LOG_MESSAGES_ON_CHANGE = "debug_log_messages_on_change"
 CONF_NON_NASA_TX_DELAY_MS = "non_nasa_tx_delay_ms"
+
+# Selects the Non-NASA indoor-unit bus protocol while keeping COM1 as the default.
+CONF_NON_NASA_BUS = "non_nasa_bus"
+
+NON_NASA_BUS_OPTIONS = {
+    "com1": NonNasaBus.COM1,
+    "com2": NonNasaBus.COM2,
+}
 
 CONF_CAPABILITIES = "capabilities"
 CONF_CAPABILITIES_FAN_MODES = "fan_modes"
@@ -391,6 +403,12 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_DEBUG_LOG_MESSAGES, default=False): cv.boolean,
             cv.Optional(CONF_DEBUG_LOG_MESSAGES_RAW, default=False): cv.boolean,
             cv.Optional(CONF_NON_NASA_KEEPALIVE, default=False): cv.boolean,
+
+            # COM1 is the backwards-compatible default for existing Non-NASA installations.
+            cv.Optional(CONF_NON_NASA_BUS, default="com1"): cv.enum(
+                NON_NASA_BUS_OPTIONS, lower=True
+            ),
+
             cv.Optional(CONF_NON_NASA_TX_DELAY_MS, default=0): cv.int_range(
                 min=0, max=1000
             ),
@@ -670,6 +688,10 @@ async def to_code(config):
         CONF_DEBUG_LOG_MESSAGES: var.set_debug_log_messages,
         CONF_DEBUG_LOG_MESSAGES_RAW: var.set_debug_log_messages_raw,
         CONF_NON_NASA_KEEPALIVE: var.set_non_nasa_keepalive,
+
+        # Apply the selected Non-NASA COM bus protocol.
+        CONF_NON_NASA_BUS: var.set_non_nasa_bus,
+
         CONF_NON_NASA_TX_DELAY_MS: var.set_non_nasa_tx_delay_ms,
         CONF_DEBUG_LOG_UNDEFINED_MESSAGES: var.set_debug_log_undefined_messages,
         CONF_DEBUG_LOG_MESSAGES_ON_CHANGE: var.set_debug_log_messages_on_change,

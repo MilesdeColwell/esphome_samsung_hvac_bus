@@ -102,6 +102,12 @@ namespace esphome
         non_nasa_keepalive = value;
       }
 
+      // Configure whether Non-NASA indoor-unit communication uses COM1 or COM2.
+      void set_non_nasa_bus(NonNasaBus value)
+      {
+        non_nasa_bus = value;
+      }
+
       void set_non_nasa_tx_delay_ms(uint16_t value)
       {
         non_nasa_tx_delay_ms = value;
@@ -268,6 +274,7 @@ namespace esphome
       }
 
     protected:
+      // Find a configured Samsung AC device by its bus address.
       Samsung_AC_Device *find_device(const std::string &address)
       {
         auto it = devices_.find(address);
@@ -279,6 +286,7 @@ namespace esphome
       }
 
       std::map<std::string, Samsung_AC_Device *> devices_;
+
       DeviceStateTracker<Mode> state_tracker_{1000};
       std::set<std::string> addresses_;
 

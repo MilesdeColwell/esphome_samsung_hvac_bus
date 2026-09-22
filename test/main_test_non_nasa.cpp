@@ -334,7 +334,92 @@ void test_com2_status_decoding()
     assert(result53.type == DecodeResultType::Processed);
     assert(packet53.command53.mode);
     assert(*packet53.command53.mode == NonNasaMode::Cool);
+    // Unknown COM2 values must remain unset rather than being reported as valid states.
+    auto cmd52_unknown = build_packet(0x00, 0x00, 0x52, [](std::vector<uint8_t> &data) {
+        data[4] = 0x4D; // 22°C setpoint
+        data[7] = 0x00; // Unknown fan value
+        data[8] = 0x80; // Power on, but no recognised mode bits
+    });
+
+    NonNasaDataPacket packet52_unknown;
+    auto result52_unknown = packet52_unknown.decode(cmd52_unknown);
+
+    // CMD52 should still decode successfully while leaving unknown fields unset.
+    assert(result52_unknown.type == DecodeResultType::Processed);
+    assert(!packet52_unknown.command52.fanspeed);
+    assert(!packet52_unknown.command52.mode);
+    assert(packet52_unknown.command52.power == true);
+
+    // Unknown CMD53 mode values must likewise remain unset.
+    auto cmd53_unknown = build_packet(0x00, 0x00, 0x53, [](std::vector<uint8_t> &data) {
+        data[11] = 0xFF; // Unknown mode
+    });
+
+    NonNasaDataPacket packet53_unknown;
+    auto result53_unknown = packet53_unknown.decode(cmd53_unknown);
+
+    // The packet is valid even though its mode value is not understood.
+    assert(result53_unknown.type == DecodeResultType::Processed);
+    assert(!packet53_unknown.command53.mode);
 }
+
+// Test that COM2 CMD52/CMD53 packets publish state only when COM2 is selected.
+void test_com2_status_processing()
+{
+    std::cout << "test_com2_status_processing" << std::endl;
+
+    // Select COM2 so CMD52 and CMD53 are allowed to publish indoor-unit state.
+    non_nasa_bus = NonNasaBus::COM2;
+
+    DebugTarget target;
+
+    // CMD52 reports a 22°C setpoint, fan level 1, Cool mode and power on.
+    auto cmd52 = build_packet(0x00, 0xD0, 0x52, [](std::vector<uint8_t> &data) {
+        data[4] = 0x4D; // 22°C setpoint
+        data[7] = 0xFA; // Fan level 1
+        data[8] = 0x82; // Cool, power on
+    });
+
+    test_process_data(packet_to_hex(cmd52), target);
+
+    // Verify CMD52 publishes the decoded COM2 state.
+    assert(target.last_set_target_temperature_address == "00");
+    assert(target.last_set_target_temperature_value == 22.0f);
+    assert(target.last_set_power_address == "00");
+    assert(target.last_set_power_value == true);
+    assert(target.last_set_mode_address == "00");
+    assert(target.last_set_mode_mode == Mode::Cool);
+    assert(target.last_set_fanmode_address == "00");
+    assert(target.last_set_fanmode_mode == FanMode::Low);
+
+    // CMD53 independently reports the current operating mode.
+    auto cmd53 = build_packet(0x00, 0xD0, 0x53, [](std::vector<uint8_t> &data) {
+        data[11] = 0x04; // Heat
+    });
+
+    test_process_data(packet_to_hex(cmd53), target);
+
+    // Verify CMD53 can update the published mode independently of CMD52.
+    assert(target.last_set_mode_address == "00");
+    assert(target.last_set_mode_mode == Mode::Heat);
+
+    // Switch back to COM1 and verify COM2 status packets no longer publish state.
+    non_nasa_bus = NonNasaBus::COM1;
+    DebugTarget com1_target;
+
+    test_process_data(packet_to_hex(cmd52), com1_target);
+    test_process_data(packet_to_hex(cmd53), com1_target);
+
+    // Empty addresses prove none of the COM2 state setters were called in COM1 mode.
+    assert(com1_target.last_set_target_temperature_address.empty());
+    assert(com1_target.last_set_power_address.empty());
+    assert(com1_target.last_set_mode_address.empty());
+    assert(com1_target.last_set_fanmode_address.empty());
+
+    // Leave the global bus selection at the backwards-compatible default for later tests.
+    non_nasa_bus = NonNasaBus::COM1;
+}
+
 void test_previous_data_is_used_correctly()
 {
     // Sending package 20 on non nasa requiers to send the previous values
@@ -2015,6 +2100,10 @@ int main(int argc, char *argv[])
     test_com2_status_decoding();    
     test_encoding();
     test_target();
+
+    // Test COM2 packet decoding and bus-specific state publication.
+    test_com2_status_decoding();
+    test_com2_status_processing();
 
     test_previous_data_is_used_correctly();
     

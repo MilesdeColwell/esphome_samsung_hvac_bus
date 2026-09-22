@@ -753,6 +753,24 @@ namespace esphome
             }
         }
 
+        // Convert the four manual COM2 CMD52 fan levels to Home Assistant fan modes.
+        optional<FanMode> com2_fanspeed_to_fanmode(uint8_t value)
+        {
+            switch (value)
+            {
+            case 1:
+                return FanMode::Low;
+            case 2:
+                return FanMode::Mid;
+            case 3:
+                return FanMode::High;
+            case 4:
+                return FanMode::Turbo;
+            default:
+                return {};
+            }
+        }
+
         void NonNasaProtocol::publish_request(MessageTarget *target, const std::string &address, ProtocolRequest &request)
         {
             auto req = NonNasaRequest::create(address);
@@ -1010,6 +1028,40 @@ namespace esphome
                                                    (nonpacket_.command20.wind_direction == NonNasaWindDirection::FourWay));
                 }
             }
+
+            else if (non_nasa_bus == NonNasaBus::COM2 &&
+                     nonpacket_.cmd == NonNasaCommand::Cmd52)
+            {
+                // CMD52 provides the primary indoor-unit state when using the COM2 bus.
+                target->set_target_temperature(nonpacket_.src, nonpacket_.command52.target_temp);
+                target->set_power(nonpacket_.src, nonpacket_.command52.power);
+
+                // Publish fan speed only when the observed COM2 value is recognised.
+                if (nonpacket_.command52.fanspeed)
+                {
+                    auto fanmode = com2_fanspeed_to_fanmode(*nonpacket_.command52.fanspeed);
+                    if (fanmode)
+                        target->set_fanmode(nonpacket_.src, *fanmode);
+                }
+
+                // Publish mode only when CMD52 contains a recognised COM2 mode value.
+                if (nonpacket_.command52.mode)
+                {
+                    target->set_mode(nonpacket_.src,
+                                     nonnasa_mode_to_mode(*nonpacket_.command52.mode));
+                }
+            }
+            else if (non_nasa_bus == NonNasaBus::COM2 &&
+                     nonpacket_.cmd == NonNasaCommand::Cmd53)
+            {
+                // CMD53 provides an additional COM2 operating-mode status update.
+                if (nonpacket_.command53.mode)
+                {
+                    target->set_mode(nonpacket_.src,
+                                     nonnasa_mode_to_mode(*nonpacket_.command53.mode));
+                }
+            }
+
             else if (nonpacket_.cmd == NonNasaCommand::CmdC0)
             {
                 // CmdC0 comes from the outdoor unit and contains outdoor temperature

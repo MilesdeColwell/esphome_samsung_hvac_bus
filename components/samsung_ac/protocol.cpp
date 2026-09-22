@@ -26,6 +26,9 @@ namespace esphome
         bool non_nasa_keepalive = false;
         uint16_t non_nasa_tx_delay_ms = 0;
 
+        // COM1 remains the default to preserve existing Non-NASA behaviour.
+        NonNasaBus non_nasa_bus = NonNasaBus::COM1;
+
         ProtocolProcessing protocol_processing = ProtocolProcessing::Auto;
 
         uint16_t skip_data(std::vector<uint8_t> &data, int from)

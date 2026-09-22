@@ -10,6 +10,14 @@ namespace esphome
     {
         extern bool non_nasa_keepalive;
         extern uint16_t non_nasa_tx_delay_ms;
+        // Selects which Samsung Non-NASA bus protocol is used for indoor-unit communication.
+        enum class NonNasaBus
+        {
+            COM1,
+            COM2
+        };
+
+        extern NonNasaBus non_nasa_bus;
 
         enum class DecodeResultType
         {

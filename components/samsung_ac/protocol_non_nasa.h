@@ -140,13 +140,19 @@ namespace esphome
         struct NonNasaCommand52 // COM2 current state from indoor unit
         {
             float target_temp = 0;
-            optional<uint8_t> fanspeed; // Manual fan level 1-4
+
+            // Fan speed is absent when CMD52 contains an unrecognised COM2 fan value.
+            optional<uint8_t> fanspeed;
+
+            // Mode is absent when CMD52 contains an unrecognised COM2 mode value.
             optional<NonNasaMode> mode;
+
             bool power = false;
         };
-        
+
         struct NonNasaCommand53 // COM2 status from indoor unit
         {
+            // Mode is absent when CMD53 contains an unrecognised COM2 mode value.
             optional<NonNasaMode> mode;
         };
 
