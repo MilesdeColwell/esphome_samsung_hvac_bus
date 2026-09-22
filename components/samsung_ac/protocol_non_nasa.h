@@ -244,6 +244,37 @@ namespace esphome
             static NonNasaRequest create(std::string dst_address);
         };
 
+        struct Com2State
+        {
+            float target_temp = 22.0f;
+            FanMode fanspeed = FanMode::Low;
+            Mode mode = Mode::Cool;
+            bool power = false;
+
+            bool has_target_temp = false;
+            bool has_fanspeed = false;
+            bool has_mode = false;
+            bool has_power = false;
+        };
+
+        struct Com2Request
+        {
+            std::string dst;
+
+            float target_temp = 22.0f;
+            FanMode fanspeed = FanMode::Low;
+            Mode mode = Mode::Cool;
+            bool power = false;
+
+            std::vector<uint8_t> encode();
+        };
+
+        struct Com2RequestQueueItem
+        {
+            Com2Request request;
+            uint32_t time;
+        };
+
         struct NonNasaRequestQueueItem
         {
             NonNasaRequest request;
@@ -254,6 +285,7 @@ namespace esphome
         };
 
         extern std::list<NonNasaRequestQueueItem> nonnasa_requests;
+        extern std::list<Com2RequestQueueItem> com2_requests;
         extern bool controller_registered;
         extern bool indoor_unit_awake;
 
@@ -270,6 +302,7 @@ namespace esphome
 
             void publish_request(MessageTarget *target, const std::string &address, ProtocolRequest &request) override;
             void protocol_update(MessageTarget *target) override;
+
         };
     } // namespace samsung_ac
 } // namespace esphome

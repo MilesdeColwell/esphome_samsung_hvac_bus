@@ -9,6 +9,7 @@
 #include "protocol_non_nasa.h"
 
 std::map<std::string, esphome::samsung_ac::NonNasaCommand20> last_command20s_;
+std::map<std::string, esphome::samsung_ac::Com2State> last_com2_states_;
 
 esphome::samsung_ac::NonNasaDataPacket nonpacket_;
 
@@ -146,8 +147,15 @@ namespace esphome
             return true; // Energy was calculated and tracker was updated
         }
         std::list<NonNasaRequestQueueItem> nonnasa_requests;
+        std::list<Com2RequestQueueItem> com2_requests;
         bool controller_registered = false;
         bool indoor_unit_awake = true;
+
+        // COM2 A0 control packets are sent in the known-good idle window
+        // following the 84 -> AD D1 master-cycle boundary.
+        static bool com2_tx_pending_ = false;
+        static uint32_t com2_tx_due_ms_ = 0;
+        static constexpr uint32_t COM2_TX_AFTER_D1_MS = 120;
 
         uint8_t build_checksum(std::vector<uint8_t> &data)
         {
@@ -483,22 +491,22 @@ namespace esphome
             {
                 // CMD52 reports the current COM2 settings from the indoor unit.
                 command52.target_temp = (float)data[4] - 0x37;
-            
+
                 // Decode the four manual fan levels observed in payload byte B3.
                 command52.fanspeed = decode_com2_fanspeed(data[7]);
-            
+
                 // Payload byte B4 contains both the current operating mode and power state.
                 command52.mode = decode_com2_state_mode(data[8]);
                 command52.power = data[8] & 0x80;
-            
+
                 return {DecodeResultType::Processed, 14};
             }
-            
+
             case NonNasaCommand::Cmd53:
             {
                 // CMD53 payload byte B7 reports the current COM2 operating mode.
                 command53.mode = decode_com2_mode(data[11]);
-            
+
                 return {DecodeResultType::Processed, 14};
             }
 
@@ -661,6 +669,86 @@ namespace esphome
             }
         }
 
+        std::vector<uint8_t> Com2Request::encode()
+        {
+            std::vector<uint8_t> data{
+                0x32,                     // 00 start
+                0x84,                     // 01 src - temporary COM2 controller address
+                (uint8_t)hex_to_int(dst), // 02 dst
+                0xA0,                     // 03 cmd
+                0x1F,                     // 04
+                0x18,                     // 05
+                0x00,                     // 06 fan + target temperature
+                0x00,                     // 07 mode
+                0x00,                     // 08 power
+                0x00,                     // 09
+                0x00,                     // 10
+                0x00,                     // 11
+                0x00,                     // 12 crc
+                0x34                      // 13 end
+            };
+
+            // Target temperature occupies the low five bits as the absolute Celsius value.
+            float clamped_temp = target_temp;
+            if (clamped_temp < 16.0f)
+                clamped_temp = 16.0f;
+            else if (clamped_temp > 30.0f)
+                clamped_temp = 30.0f;
+
+            uint8_t temp = static_cast<uint8_t>(clamped_temp) & 0x1F;
+
+            // COM2 manual fan selection occupies the upper bits.
+            uint8_t fan_bits = 0x40;
+            switch (fanspeed)
+            {
+            case FanMode::Low:
+                fan_bits = 0x40;
+                break;
+            case FanMode::Mid:
+                fan_bits = 0x80;
+                break;
+            case FanMode::High:
+                fan_bits = 0xA0;
+                break;
+            case FanMode::Turbo:
+                fan_bits = 0x00;
+                break;
+            case FanMode::Auto:
+            default:
+                fan_bits = 0x40;
+                break;
+            }
+
+            data[6] = fan_bits | temp;
+
+            switch (mode)
+            {
+            case Mode::Auto:
+                data[7] = 0x00;
+                break;
+            case Mode::Cool:
+                data[7] = 0x01;
+                break;
+            case Mode::Dry:
+                data[7] = 0x02;
+                break;
+            case Mode::Fan:
+                data[7] = 0x03;
+                break;
+            case Mode::Heat:
+                data[7] = 0x04;
+                break;
+            default:
+                data[7] = 0x00;
+                break;
+            }
+
+            data[8] = power ? 0xF4 : 0xC4;
+            data[12] = build_checksum(data);
+
+            return data;
+        }
+
         std::vector<uint8_t> NonNasaRequest::encode()
         {
             std::vector<uint8_t> data{
@@ -773,6 +861,72 @@ namespace esphome
 
         void NonNasaProtocol::publish_request(MessageTarget *target, const std::string &address, ProtocolRequest &request)
         {
+
+            if (non_nasa_bus == NonNasaBus::COM2)
+            {
+                auto state_it = last_com2_states_.find(address);
+
+                // A COM2 A0 packet contains the complete control state. Do not send
+                // until CMD52 has given us enough authoritative state to preserve
+                // fields that the HA request did not change.
+                if (state_it == last_com2_states_.end() ||
+                    !state_it->second.has_target_temp ||
+                    !state_it->second.has_fanspeed ||
+                    !state_it->second.has_mode ||
+                    !state_it->second.has_power)
+                {
+                    LOGW("Cannot send COM2 control for %s: no complete CMD52 state received yet",
+                         address.c_str());
+                    return;
+                }
+
+                const auto &state = state_it->second;
+
+                Com2Request req;
+                req.dst = address;
+                req.target_temp = state.target_temp;
+                req.fanspeed = state.fanspeed;
+                req.mode = state.mode;
+                req.power = state.power;
+
+                // Apply only the fields requested by Home Assistant.
+                if (request.target_temp)
+                    req.target_temp = request.target_temp.value();
+
+                if (request.fan_mode)
+                    req.fanspeed = request.fan_mode.value();
+
+                if (request.mode)
+                {
+                    req.mode = request.mode.value();
+                    req.power = true; // Setting a mode also turns the system on.
+                }
+
+                if (request.power)
+                    req.power = request.power.value();
+
+                if (request.alt_mode)
+                    LOGW("change altmode is currently not implemented for COM2");
+
+                if (request.swing_mode)
+                    LOGW("change swing mode is currently not implemented for COM2");
+
+                Com2RequestQueueItem item;
+                item.request = req;
+                item.time = millis();
+
+                if (com2_requests.size() < 10)
+                {
+                    com2_requests.push_back(item);
+                }
+                else
+                {
+                    LOGW("COM2 control queue full; dropping request for %s", address.c_str());
+                }
+
+                return;
+            }
+
             auto req = NonNasaRequest::create(address);
 
             if (request.mode)
@@ -919,6 +1073,21 @@ namespace esphome
             {
                 LOG_PACKET_RECV("RECV", nonpacket_);
             }
+            // COM2 control timing:
+            // The reverse-engineering testbed established that A0 control packets are
+            // reliably transmitted 120 ms after the 84 -> AD D1 master-cycle boundary.
+            if (non_nasa_bus == NonNasaBus::COM2 &&
+                nonpacket_.src == "84" &&
+                nonpacket_.dst == "ad" &&
+                static_cast<uint8_t>(nonpacket_.cmd) == 0xD1 &&
+                !com2_requests.empty())
+            {
+                com2_tx_pending_ = true;
+                com2_tx_due_ms_ = millis() + COM2_TX_AFTER_D1_MS;
+
+                LOGD("COM2 D1 boundary detected; control TX scheduled in %u ms",
+                     COM2_TX_AFTER_D1_MS);
+            }
 
             target->register_address(nonpacket_.src);
 
@@ -1032,33 +1201,54 @@ namespace esphome
             else if (non_nasa_bus == NonNasaBus::COM2 &&
                      nonpacket_.cmd == NonNasaCommand::Cmd52)
             {
-                // CMD52 provides the primary indoor-unit state when using the COM2 bus.
-                target->set_target_temperature(nonpacket_.src, nonpacket_.command52.target_temp);
-                target->set_power(nonpacket_.src, nonpacket_.command52.power);
+                // CMD52 provides the primary authoritative indoor-unit state on COM2.
+                auto &state = last_com2_states_[nonpacket_.src];
 
-                // Publish fan speed only when the observed COM2 value is recognised.
+                state.target_temp = nonpacket_.command52.target_temp;
+                state.has_target_temp = true;
+
+                state.power = nonpacket_.command52.power;
+                state.has_power = true;
+
+                target->set_target_temperature(nonpacket_.src, state.target_temp);
+                target->set_power(nonpacket_.src, state.power);
+
+                // Preserve the previous known fan state if this packet contains
+                // an unrecognised COM2 fan value.
                 if (nonpacket_.command52.fanspeed)
                 {
                     auto fanmode = com2_fanspeed_to_fanmode(*nonpacket_.command52.fanspeed);
                     if (fanmode)
+                    {
+                        state.fanspeed = *fanmode;
+                        state.has_fanspeed = true;
                         target->set_fanmode(nonpacket_.src, *fanmode);
+                    }
                 }
 
-                // Publish mode only when CMD52 contains a recognised COM2 mode value.
+                // Preserve the previous known mode if this packet contains
+                // an unrecognised COM2 mode value.
                 if (nonpacket_.command52.mode)
                 {
-                    target->set_mode(nonpacket_.src,
-                                     nonnasa_mode_to_mode(*nonpacket_.command52.mode));
+                    state.mode = nonnasa_mode_to_mode(*nonpacket_.command52.mode);
+                    state.has_mode = true;
+                    target->set_mode(nonpacket_.src, state.mode);
                 }
             }
+
+
             else if (non_nasa_bus == NonNasaBus::COM2 &&
                      nonpacket_.cmd == NonNasaCommand::Cmd53)
             {
-                // CMD53 provides an additional COM2 operating-mode status update.
+                // CMD53 independently confirms the current COM2 operating mode.
                 if (nonpacket_.command53.mode)
                 {
-                    target->set_mode(nonpacket_.src,
-                                     nonnasa_mode_to_mode(*nonpacket_.command53.mode));
+                    auto &state = last_com2_states_[nonpacket_.src];
+
+                    state.mode = nonnasa_mode_to_mode(*nonpacket_.command53.mode);
+                    state.has_mode = true;
+
+                    target->set_mode(nonpacket_.src, state.mode);
                 }
             }
 
@@ -1182,6 +1372,38 @@ namespace esphome
 
         void NonNasaProtocol::protocol_update(MessageTarget *target)
         {
+
+            // COM2 control TX.
+            // A queued request is armed until the 84 -> AD D1 master-cycle boundary is
+            // observed. process_non_nasa_packet() then schedules transmission 120 ms
+            // into the known-good post-D1 idle window.
+            if (non_nasa_bus == NonNasaBus::COM2 &&
+                com2_tx_pending_ &&
+                !com2_requests.empty())
+            {
+                const uint32_t now = millis();
+
+                if ((int32_t)(now - com2_tx_due_ms_) >= 0)
+                {
+                    auto &item = com2_requests.front();
+
+                    LOGD("Sending scheduled COM2 control request to %s after D1",
+                         item.request.dst.c_str());
+
+                    target->publish_data(0, item.request.encode());
+
+                    com2_requests.pop_front();
+                    com2_tx_pending_ = false;
+                }
+            }
+
+            // COM2 does not use the COM1 controller registration, C6 scheduling,
+            // Cmd54 acknowledgement, retry, wake-up or keepalive machinery.
+            if (non_nasa_bus == NonNasaBus::COM2)
+            {
+                return;
+            }
+
             // non-blocking keepalive send (scheduled from broadcast request).
             // Uses try_send_register_controller() to enforce the shared 10-second rate limit
             // so the keepalive cannot fire back-to-back with an initial registration or wake-up send.
@@ -1220,7 +1442,7 @@ namespace esphome
             // If we're not currently registered, keep sending a registration request until it has
             // been confirmed by the outdoor unit. Uses try_send_register_controller() to enforce
             // the shared 10-second rate limit so this path cannot spam the bus.
-            if (!controller_registered)
+            if (non_nasa_bus == NonNasaBus::COM1 && !controller_registered)
             {
                 try_send_register_controller(target);
             }

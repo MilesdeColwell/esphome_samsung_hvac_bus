@@ -66,6 +66,48 @@ namespace esphome
       std::function<void(Mode)> write_state_;
     };
 
+    class Samsung_AC_Fan_Mode_Select : public select::Select
+    {
+    public:
+      void publish_state_(FanMode fanmode)
+      {
+        switch (fanmode)
+        {
+        case FanMode::Low:
+          this->publish_state("Low");
+          break;
+        case FanMode::Mid:
+          this->publish_state("Mid");
+          break;
+        case FanMode::High:
+          this->publish_state("High");
+          break;
+        case FanMode::Turbo:
+          this->publish_state("Turbo");
+          break;
+        case FanMode::Auto:
+          this->publish_state("Auto");
+          break;
+        }
+      }
+
+      void control(const std::string &value) override
+      {
+        if (value == "Low")
+          write_state_(FanMode::Low);
+        else if (value == "Mid")
+          write_state_(FanMode::Mid);
+        else if (value == "High")
+          write_state_(FanMode::High);
+        else if (value == "Turbo")
+          write_state_(FanMode::Turbo);
+        else if (value == "Auto")
+          write_state_(FanMode::Auto);
+      }
+
+      std::function<void(FanMode)> write_state_;
+    };
+
     class Samsung_AC_Water_Heater_Mode_Select : public select::Select
     {
     public:
@@ -138,6 +180,7 @@ namespace esphome
       Samsung_AC_Switch *automatic_cleaning{nullptr};
       Samsung_AC_Switch *water_heater_power{nullptr};
       Samsung_AC_Mode_Select *mode{nullptr};
+      Samsung_AC_Fan_Mode_Select *fanmode{nullptr};
       Samsung_AC_Water_Heater_Mode_Select *waterheatermode{nullptr};
       Samsung_AC_Climate *climate{nullptr};
       std::map<uint16_t, sensor::Sensor *> custom_sensor_map;
@@ -290,6 +333,17 @@ namespace esphome
         };
       }
 
+      void set_fan_mode_select(Samsung_AC_Fan_Mode_Select *select)
+      {
+        fanmode = select;
+        fanmode->write_state_ = [this](FanMode value)
+        {
+          ProtocolRequest request;
+          request.fan_mode = value;
+          publish_request(request);
+        };
+      }
+
       void set_water_heater_mode_select(Samsung_AC_Water_Heater_Mode_Select *select)
       {
         waterheatermode = select;
@@ -413,6 +467,9 @@ namespace esphome
 
       void update_fanmode(FanMode value)
       {
+        if (fanmode != nullptr)
+          fanmode->publish_state_(value);
+
         if (climate != nullptr)
         {
           climate->apply_fanmode_from_device(value);

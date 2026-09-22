@@ -51,6 +51,9 @@ Samsung_AC = samsung_ac.class_("Samsung_AC", cg.PollingComponent, uart.UARTDevic
 Samsung_AC_Device = samsung_ac.class_("Samsung_AC_Device")
 Samsung_AC_Switch = samsung_ac.class_("Samsung_AC_Switch", switch.Switch)
 Samsung_AC_Mode_Select = samsung_ac.class_("Samsung_AC_Mode_Select", select.Select)
+Samsung_AC_Fan_Mode_Select = samsung_ac.class_(
+    "Samsung_AC_Fan_Mode_Select", select.Select
+)
 Samsung_AC_Water_Heater_Mode_Select = samsung_ac.class_(
     "Samsung_AC_Water_Heater_Mode_Select", select.Select
 )
@@ -59,6 +62,7 @@ Samsung_AC_Climate = samsung_ac.class_("Samsung_AC_Climate", climate.Climate)
 
 # not sure why select.select_schema did not work yet
 SELECT_MODE_SCHEMA = select.select_schema(Samsung_AC_Mode_Select)
+SELECT_FAN_MODE_SCHEMA = select.select_schema(Samsung_AC_Fan_Mode_Select)
 SELECT_WATER_HEATER_MODE_SCHEMA = select.select_schema(
     Samsung_AC_Water_Heater_Mode_Select
 )
@@ -84,6 +88,7 @@ CONF_DEVICE_POWER = "power"
 CONF_DEVICE_AUTOMATIC_CLEANING = "automatic_cleaning"
 CONF_DEVICE_WATER_HEATER_POWER = "water_heater_power"
 CONF_DEVICE_MODE = "mode"
+CONF_DEVICE_FAN_MODE = "fan_mode"
 CONF_DEVICE_WATER_HEATER_MODE = "water_heater_mode"
 CONF_DEVICE_CLIMATE = "climate"
 CONF_DEVICE_ROOM_HUMIDITY = "room_humidity"
@@ -297,6 +302,7 @@ DEVICE_SCHEMA = cv.Schema(
             Samsung_AC_Switch
         ),
         cv.Optional(CONF_DEVICE_MODE): SELECT_MODE_SCHEMA,
+        cv.Optional(CONF_DEVICE_FAN_MODE): SELECT_FAN_MODE_SCHEMA,
         cv.Optional(CONF_DEVICE_WATER_HEATER_MODE): SELECT_WATER_HEATER_MODE_SCHEMA,
         cv.Optional(CONF_DEVICE_CLIMATE): CLIMATE_SCHEMA,
         cv.Optional(CONF_MAP_AUTO_TO_HEAT_COOL, default=False): cv.boolean,
@@ -600,6 +606,12 @@ async def to_code(config):
             values = ["Auto", "Cool", "Dry", "Fan", "Heat"]
             sel = await select.new_select(conf, options=values)
             cg.add(var_dev.set_mode_select(sel))
+
+        if CONF_DEVICE_FAN_MODE in device:
+            conf = device[CONF_DEVICE_FAN_MODE]
+            values = ["Low", "Mid", "High", "Turbo"]
+            sel = await select.new_select(conf, options=values)
+            cg.add(var_dev.set_fan_mode_select(sel))
 
         if CONF_DEVICE_WATER_HEATER_MODE in device:
             conf = device[CONF_DEVICE_WATER_HEATER_MODE]
