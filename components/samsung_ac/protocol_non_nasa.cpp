@@ -151,11 +151,12 @@ namespace esphome
         bool controller_registered = false;
         bool indoor_unit_awake = true;
 
-        // COM2 A0 control packets are sent in the known-good idle window
-        // following the 84 -> AD D1 master-cycle boundary.
+        // COM2 EXPERIMENTAL controller-85 injection.
+        // Schedule A0 in controller 85's first indoor-unit slot following
+        // the 85 -> 84 C4 response.
         static bool com2_tx_pending_ = false;
         static uint32_t com2_tx_due_ms_ = 0;
-        static constexpr uint32_t COM2_TX_AFTER_D1_MS = 120;
+        static constexpr uint32_t COM2_TX_AFTER_85_C4_MS = 180;
 
         uint8_t build_checksum(std::vector<uint8_t> &data)
         {
@@ -673,7 +674,7 @@ namespace esphome
         {
             std::vector<uint8_t> data{
                 0x32,                     // 00 start
-                0x84,                     // 01 src - temporary COM2 controller address
+                0x85,                     // 01 src - temporary COM2 controller address
                 (uint8_t)hex_to_int(dst), // 02 dst
                 0xA0,                     // 03 cmd
                 0x1F,                     // 04
@@ -1073,20 +1074,21 @@ namespace esphome
             {
                 LOG_PACKET_RECV("RECV", nonpacket_);
             }
-            // COM2 control timing:
-            // The reverse-engineering testbed established that A0 control packets are
-            // reliably transmitted 120 ms after the 84 -> AD D1 master-cycle boundary.
+            // COM2 EXPERIMENTAL control timing:
+            // Physical controller 85 sends its first indoor-unit transaction in the
+            // slot following the 85 -> 84 C4 response. For this experiment, use that
+            // controller-85 slot instead of injecting during controller 84's phase.
             if (non_nasa_bus == NonNasaBus::COM2 &&
-                nonpacket_.src == "84" &&
-                nonpacket_.dst == "ad" &&
-                static_cast<uint8_t>(nonpacket_.cmd) == 0xD1 &&
+                nonpacket_.src == "85" &&
+                nonpacket_.dst == "84" &&
+                static_cast<uint8_t>(nonpacket_.cmd) == 0xC4 &&
                 !com2_requests.empty())
             {
                 com2_tx_pending_ = true;
-                com2_tx_due_ms_ = millis() + COM2_TX_AFTER_D1_MS;
+                com2_tx_due_ms_ = millis() + COM2_TX_AFTER_85_C4_MS;
 
-                LOGD("COM2 D1 boundary detected; control TX scheduled in %lu ms",
-                     static_cast<unsigned long>(COM2_TX_AFTER_D1_MS));
+                LOGD("COM2 85->84 C4 detected; experimental controller-85 TX scheduled in %lu ms",
+                     static_cast<unsigned long>(COM2_TX_AFTER_85_C4_MS));
             }
 
             target->register_address(nonpacket_.src);
@@ -1097,7 +1099,8 @@ namespace esphome
                 indoor_unit_awake = true;
             }
 
-            if (nonpacket_.cmd == NonNasaCommand::Cmd20)
+            if (non_nasa_bus != NonNasaBus::COM2 &&
+                nonpacket_.cmd == NonNasaCommand::Cmd20)
             {
                 // We may occasionally not receive a control_acknowledgement message when sending a control
                 // packet, so as a backup approach check if the state of the device matches that of the
@@ -1199,7 +1202,8 @@ namespace esphome
             }
 
             else if (non_nasa_bus == NonNasaBus::COM2 &&
-                     nonpacket_.cmd == NonNasaCommand::Cmd52)
+                     nonpacket_.cmd == NonNasaCommand::Cmd52 &&
+                     nonpacket_.src == "20")
             {
                 // CMD52 provides the primary authoritative indoor-unit state on COM2.
                 auto &state = last_com2_states_[nonpacket_.src];
@@ -1236,21 +1240,6 @@ namespace esphome
                 }
             }
 
-
-            else if (non_nasa_bus == NonNasaBus::COM2 &&
-                     nonpacket_.cmd == NonNasaCommand::Cmd53)
-            {
-                // CMD53 independently confirms the current COM2 operating mode.
-                if (nonpacket_.command53.mode)
-                {
-                    auto &state = last_com2_states_[nonpacket_.src];
-
-                    state.mode = nonnasa_mode_to_mode(*nonpacket_.command53.mode);
-                    state.has_mode = true;
-
-                    target->set_mode(nonpacket_.src, state.mode);
-                }
-            }
 
             else if (nonpacket_.cmd == NonNasaCommand::CmdC0)
             {
@@ -1373,10 +1362,9 @@ namespace esphome
         void NonNasaProtocol::protocol_update(MessageTarget *target)
         {
 
-            // COM2 control TX.
-            // A queued request is armed until the 84 -> AD D1 master-cycle boundary is
-            // observed. process_non_nasa_packet() then schedules transmission 120 ms
-            // into the known-good post-D1 idle window.
+            // COM2 EXPERIMENTAL control TX.
+            // A queued request is transmitted in controller 85's first indoor-unit
+            // slot after observing the 85 -> 84 C4 response.
             if (non_nasa_bus == NonNasaBus::COM2 &&
                 com2_tx_pending_ &&
                 !com2_requests.empty())
@@ -1387,7 +1375,7 @@ namespace esphome
                 {
                     auto &item = com2_requests.front();
 
-                    LOGD("Sending scheduled COM2 control request to %s after D1",
+                    LOGD("Sending experimental COM2 control as controller 85 to %s",
                          item.request.dst.c_str());
 
                     target->publish_data(0, item.request.encode());
