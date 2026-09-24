@@ -22,4 +22,29 @@ If you're looking for a more detailed explanation of the NonNASA protocol, take 
 ### Key Characteristics:
 - **Simple Data Transport:** Designed for straightforward communication of basic air conditioner data.
 - **Fewer Data Types Supported:** Primarily supports basic values like temperatures, modes, and error codes.
+
+
 - **Limited Data Capacity:** Transfers fewer types of data compared to NASA.
+
+### COM1 and COM2
+
+NonNASA systems may use different communication buses.
+
+This integration supports:
+
+- **COM1**, typically connected to the Samsung **F1/F2** communication bus.
+- **COM2**, connected to the Samsung **F3/F4** wired-controller communication bus.
+
+COM1 remains the default for backwards compatibility. COM2 installations must
+explicitly select the COM2 implementation in their ESPHome configuration:
+
+```yaml
+samsung_ac:
+  non_nasa_bus: com2
+
+COM2 uses different communication behaviour from COM1 and should not be treated
+as simply another pair of terminals carrying the same protocol.
+
+For COM2 wiring, configuration, implementation details, verified mode
+constraints, and current limitations, see the
+[COM2 Protocol](COM2-Protocol.md) documentation.

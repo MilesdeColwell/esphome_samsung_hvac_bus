@@ -3,7 +3,7 @@
 Welcome to the **ESPHome Samsung HVAC Integration** project! This project provides an [ESPHome](https://esphome.io/) component to integrate Samsung HVAC units (air conditioners or heat pumps) seamlessly into Home Assistant. Our goal is to empower users with comprehensive control and monitoring of their HVAC systems using modern, open-source tools.
 
 ## 🌟 Overview
-This project focuses on Samsung HVAC units that communicate via a dedicated hardware bus (commonly F1/F2, sometimes called R1/R2). Samsung uses two main protocols for communication between indoor and outdoor units:
+This project focuses on Samsung HVAC units that communicate via dedicated hardware buses, including F1/F2 (sometimes called R1/R2) and, on supported NonNASA COM2 systems, the F3/F4 wired-controller bus. Samsung uses two main protocols for communication between HVAC units:
 - **NASA Protocol**: Newer models utilize this more advanced protocol.
 - **NonNASA Protocol**: Older units often rely on this simpler protocol.
 

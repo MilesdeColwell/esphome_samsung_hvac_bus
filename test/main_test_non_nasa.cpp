@@ -437,7 +437,7 @@ void test_com2_request_encoding()
 
     assert(cool_data.size() == 14);
     assert(cool_data[0] == 0x32);
-    assert(cool_data[1] == 0x84);
+    assert(cool_data[1] == 0x85);
     assert(cool_data[2] == 0x20);
     assert(cool_data[3] == 0xA0);
     assert(cool_data[4] == 0x1F);
@@ -468,18 +468,152 @@ void test_com2_request_encoding()
     assert(heat_data[8] == 0xC4); // Power off
 
     // Turbo corresponds to the fourth/cycling COM2 fan setting.
+    // Turbo is valid in Cool mode.
     Com2Request turbo;
     turbo.dst = "20";
     turbo.target_temp = 24.0f;
     turbo.fanspeed = FanMode::Turbo;
-    turbo.mode = Mode::Fan;
+    turbo.mode = Mode::Cool;
     turbo.power = true;
-
+    
     auto turbo_data = turbo.encode();
-
+    
     assert(turbo_data[6] == 0x18); // Fan 4 (0x00) + 24°C offset (0x18)
-    assert(turbo_data[7] == 0x03); // Fan mode
+    assert(turbo_data[7] == 0x01); // Cool
     assert(turbo_data[8] == 0xF4); // Power on
+}
+
+void test_com2_mode_capabilities()
+{
+    std::cout << "test_com2_mode_capabilities" << std::endl;
+
+    Com2Capabilities capabilities;
+
+    // Auto: 18-30°C, Turbo only.
+    const auto *auto_mode =
+        get_com2_mode_capabilities(capabilities, Mode::Auto);
+    assert(auto_mode != nullptr);
+    assert(auto_mode->supports_temperature);
+    assert(com2_temperature_allowed(*auto_mode, 18.0f));
+    assert(com2_temperature_allowed(*auto_mode, 30.0f));
+    assert(!com2_temperature_allowed(*auto_mode, 17.0f));
+    assert(com2_fan_mode_allowed(*auto_mode, FanMode::Turbo));
+    assert(!com2_fan_mode_allowed(*auto_mode, FanMode::Low));
+    assert(!com2_fan_mode_allowed(*auto_mode, FanMode::Mid));
+    assert(!com2_fan_mode_allowed(*auto_mode, FanMode::High));
+
+    // Cool: 18-30°C, all four COM2 fan levels.
+    const auto *cool =
+        get_com2_mode_capabilities(capabilities, Mode::Cool);
+    assert(cool != nullptr);
+    assert(cool->supports_temperature);
+    assert(com2_temperature_allowed(*cool, 18.0f));
+    assert(!com2_temperature_allowed(*cool, 17.0f));
+    assert(com2_fan_mode_allowed(*cool, FanMode::Low));
+    assert(com2_fan_mode_allowed(*cool, FanMode::Mid));
+    assert(com2_fan_mode_allowed(*cool, FanMode::High));
+    assert(com2_fan_mode_allowed(*cool, FanMode::Turbo));
+
+    // Dry: 18-30°C, Turbo only.
+    const auto *dry =
+        get_com2_mode_capabilities(capabilities, Mode::Dry);
+    assert(dry != nullptr);
+    assert(dry->supports_temperature);
+    assert(com2_fan_mode_allowed(*dry, FanMode::Turbo));
+    assert(!com2_fan_mode_allowed(*dry, FanMode::Low));
+    assert(!com2_fan_mode_allowed(*dry, FanMode::Mid));
+    assert(!com2_fan_mode_allowed(*dry, FanMode::High));
+
+    // Fan: no meaningful temperature; Low/Mid/High only.
+    const auto *fan =
+        get_com2_mode_capabilities(capabilities, Mode::Fan);
+    assert(fan != nullptr);
+    assert(!fan->supports_temperature);
+    assert(com2_fan_mode_allowed(*fan, FanMode::Low));
+    assert(com2_fan_mode_allowed(*fan, FanMode::Mid));
+    assert(com2_fan_mode_allowed(*fan, FanMode::High));
+    assert(!com2_fan_mode_allowed(*fan, FanMode::Turbo));
+
+    // Heat: 16-30°C, all four COM2 fan levels.
+    const auto *heat =
+        get_com2_mode_capabilities(capabilities, Mode::Heat);
+    assert(heat != nullptr);
+    assert(heat->supports_temperature);
+    assert(com2_temperature_allowed(*heat, 16.0f));
+    assert(!com2_temperature_allowed(*heat, 15.0f));
+    assert(com2_fan_mode_allowed(*heat, FanMode::Low));
+    assert(com2_fan_mode_allowed(*heat, FanMode::Mid));
+    assert(com2_fan_mode_allowed(*heat, FanMode::High));
+    assert(com2_fan_mode_allowed(*heat, FanMode::Turbo));
+}
+
+void test_com2_request_resolution()
+{
+    std::cout << "test_com2_request_resolution" << std::endl;
+
+    Com2Capabilities capabilities;
+
+    // Heat 16 -> Cool must raise the setpoint to Cool's 18°C minimum.
+    Com2Request heat_to_cool;
+    heat_to_cool.dst = "20";
+    heat_to_cool.target_temp = 16.0f;
+    heat_to_cool.fanspeed = FanMode::High;
+    heat_to_cool.mode = Mode::Cool;
+    heat_to_cool.power = true;
+
+    assert(resolve_com2_request(capabilities, heat_to_cool));
+    assert(heat_to_cool.target_temp == 18.0f);
+    assert(heat_to_cool.fanspeed == FanMode::High);
+    assert(com2_request_valid(capabilities, heat_to_cool));
+
+    // Cool Turbo -> Fan must replace unsupported Turbo with High.
+    Com2Request cool_to_fan;
+    cool_to_fan.dst = "20";
+    cool_to_fan.target_temp = 24.0f;
+    cool_to_fan.fanspeed = FanMode::Turbo;
+    cool_to_fan.mode = Mode::Fan;
+    cool_to_fan.power = true;
+
+    assert(resolve_com2_request(capabilities, cool_to_fan));
+    assert(cool_to_fan.fanspeed == FanMode::High);
+    assert(com2_request_valid(capabilities, cool_to_fan));
+
+    // Auto permits only Turbo.
+    Com2Request auto_mode;
+    auto_mode.dst = "20";
+    auto_mode.target_temp = 22.0f;
+    auto_mode.fanspeed = FanMode::Low;
+    auto_mode.mode = Mode::Auto;
+    auto_mode.power = true;
+
+    assert(resolve_com2_request(capabilities, auto_mode));
+    assert(auto_mode.fanspeed == FanMode::Turbo);
+    assert(com2_request_valid(capabilities, auto_mode));
+
+    // Dry likewise permits only Turbo.
+    Com2Request dry_mode;
+    dry_mode.dst = "20";
+    dry_mode.target_temp = 22.0f;
+    dry_mode.fanspeed = FanMode::Mid;
+    dry_mode.mode = Mode::Dry;
+    dry_mode.power = true;
+
+    assert(resolve_com2_request(capabilities, dry_mode));
+    assert(dry_mode.fanspeed == FanMode::Turbo);
+    assert(com2_request_valid(capabilities, dry_mode));
+
+    // A valid request must be left alone.
+    Com2Request valid_heat;
+    valid_heat.dst = "20";
+    valid_heat.target_temp = 16.0f;
+    valid_heat.fanspeed = FanMode::Turbo;
+    valid_heat.mode = Mode::Heat;
+    valid_heat.power = true;
+
+    assert(resolve_com2_request(capabilities, valid_heat));
+    assert(valid_heat.target_temp == 16.0f);
+    assert(valid_heat.fanspeed == FanMode::Turbo);
+    assert(com2_request_valid(capabilities, valid_heat));
 }
 
 void test_previous_data_is_used_correctly()
@@ -2158,15 +2292,15 @@ int main(int argc, char *argv[])
 {
     // test_read_file();
     test_decoding();
-    // Test decoding of COM2-specific status packets.
-    test_com2_status_decoding();
     test_encoding();
     test_target();
 
-    // Test COM2 packet decoding and bus-specific state publication.
+    // COM2 packet decoding, state publication, encoding and safety.
     test_com2_status_decoding();
     test_com2_status_processing();
     test_com2_request_encoding();
+    test_com2_mode_capabilities();
+    test_com2_request_resolution();
 
     test_previous_data_is_used_correctly();
 

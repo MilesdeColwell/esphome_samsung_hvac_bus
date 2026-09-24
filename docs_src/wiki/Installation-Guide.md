@@ -5,6 +5,10 @@ Before you start, make sure that your Samsung HVAC unit is compatible with this 
 
 ## Step 2: Hardware Installation
 To establish communication between your ESPHome device and Samsung HVAC unit, follow the hardware setup guidelines provided in the [Hardware Installation](Hardware-Installation.md) page. Here, you will find detailed instructions on using the recommended **M5STACK ATOM Lite + M5STACK RS-485 kit** and wiring diagrams for a successful setup.
+> **COM2 installations:** If your NonNASA system uses the COM2 wired-controller
+> bus, connect to **F3/F4** rather than F1/F2 and follow the COM2 wiring
+> instructions in [Hardware Installation](Hardware-Installation.md). See
+> [COM2 Protocol](COM2-Protocol.md) for additional COM2 details.
 
 ## Step 3: Software Installation
 
@@ -33,6 +37,15 @@ To establish communication between your ESPHome device and Samsung HVAC unit, fo
    Once you’ve identified the indoor units, add their addresses to your ESPHome YAML configuration file.  
    Create sections for each indoor unit with meaningful names and customize the properties to fit your setup.
 
+   **For COM2 installations**, add the following to your existing
+   `samsung_ac:` configuration. COM1 remains the default if this option is not
+   specified:
+
+   ```yaml
+   samsung_ac:
+     non_nasa_bus: com2
+   ```
+
 ### Remove Unneeded Properties
 6. **Clean up your configuration:**  
    Review your YAML configuration and remove unnecessary properties.  
@@ -45,5 +58,6 @@ To establish communication between your ESPHome device and Samsung HVAC unit, fo
 - [Blueprints](Blueprints-and-Integrations.md): Enhance your Home Assistant setup with additional Blueprints.
 - [Troubleshooting](Troubleshooting.md): Get help with common issues or configuration challenges.
 - [FAQ](Frequently-Asked-Questions-(FAQ).md): Check out common questions and answers.
+- [COM2 Protocol](COM2-Protocol.md): COM2 configuration, protocol details, and current limitations.
 
 By following these steps, you will be ready to use the **ESPHome Samsung HVAC Integration** effectively. 🚀
