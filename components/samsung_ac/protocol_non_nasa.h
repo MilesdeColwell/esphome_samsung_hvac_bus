@@ -244,6 +244,50 @@ namespace esphome
             static NonNasaRequest create(std::string dst_address);
         };
 
+        struct Com2ModeCapabilities
+        {
+            bool supports_temperature = true;
+            float min_temperature = 18.0f;
+            float max_temperature = 30.0f;
+
+            bool fan_low = true;
+            bool fan_mid = true;
+            bool fan_high = true;
+            bool fan_turbo = true;
+        };
+
+        struct Com2Capabilities
+        {
+            Com2ModeCapabilities auto_mode{
+                true, 18.0f, 30.0f,
+                false, false, false, true};
+        
+            Com2ModeCapabilities cool{
+                true, 18.0f, 30.0f,
+                true, true, true, true};
+        
+            Com2ModeCapabilities dry{
+                true, 18.0f, 30.0f,
+                false, false, false, true};
+        
+            Com2ModeCapabilities fan{
+                false, 18.0f, 30.0f,
+                true, true, true, false};
+        
+            Com2ModeCapabilities heat{
+                true, 16.0f, 30.0f,
+                true, true, true, true};
+        };
+
+        const Com2ModeCapabilities *get_com2_mode_capabilities(
+            const Com2Capabilities &capabilities, Mode mode);
+        
+        bool com2_fan_mode_allowed(
+            const Com2ModeCapabilities &capabilities, FanMode fan_mode);
+
+        bool com2_temperature_allowed(
+            const Com2ModeCapabilities &capabilities, float temperature);
+
         struct Com2State
         {
             float target_temp = 22.0f;
@@ -268,6 +312,12 @@ namespace esphome
 
             std::vector<uint8_t> encode();
         };
+
+        bool com2_request_valid(
+            const Com2Capabilities &capabilities, const Com2Request &request);
+
+        bool resolve_com2_request(
+            const Com2Capabilities &capabilities, Com2Request &request);
 
         struct Com2RequestQueueItem
         {

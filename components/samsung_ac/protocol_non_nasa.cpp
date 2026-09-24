@@ -860,11 +860,182 @@ namespace esphome
             }
         }
 
+        const Com2ModeCapabilities *get_com2_mode_capabilities(
+            const Com2Capabilities &capabilities, Mode mode)
+        {
+            switch (mode)
+            {
+            case Mode::Auto:
+                return &capabilities.auto_mode;
+            case Mode::Cool:
+                return &capabilities.cool;
+            case Mode::Dry:
+                return &capabilities.dry;
+            case Mode::Fan:
+                return &capabilities.fan;
+            case Mode::Heat:
+                return &capabilities.heat;
+            default:
+                return nullptr;
+            }
+        }
+
+        bool com2_fan_mode_allowed(
+            const Com2ModeCapabilities &capabilities, FanMode fan_mode)
+        {
+            switch (fan_mode)
+            {
+            case FanMode::Low:
+                return capabilities.fan_low;
+            case FanMode::Mid:
+                return capabilities.fan_mid;
+            case FanMode::High:
+                return capabilities.fan_high;
+            case FanMode::Turbo:
+                return capabilities.fan_turbo;
+            default:
+                return false;
+            }
+        }
+
+        bool com2_temperature_allowed(
+            const Com2ModeCapabilities &capabilities, float temperature)
+        {
+            if (!capabilities.supports_temperature)
+                return true;
+        
+            return temperature >= capabilities.min_temperature &&
+                   temperature <= capabilities.max_temperature;
+        }
+
+        bool com2_request_valid(
+            const Com2Capabilities &capabilities, const Com2Request &request)
+        {
+            const auto *mode_capabilities =
+                get_com2_mode_capabilities(capabilities, request.mode);
+
+            if (mode_capabilities == nullptr)
+                return false;
+
+            if (!com2_temperature_allowed(*mode_capabilities, request.target_temp))
+                return false;
+
+            if (!com2_fan_mode_allowed(*mode_capabilities, request.fanspeed))
+                return false;
+
+            return true;
+        }
+
+        bool resolve_com2_request(
+            const Com2Capabilities &capabilities, Com2Request &request)
+        {
+            const auto *mode_capabilities =
+                get_com2_mode_capabilities(capabilities, request.mode);
+        
+            if (mode_capabilities == nullptr)
+                return false;
+        
+            // Preserve the requested/current temperature when it is valid.
+            // If the destination mode uses temperature but the value is outside
+            // its supported range, clamp it to the nearest valid value.
+            if (mode_capabilities->supports_temperature &&
+                !com2_temperature_allowed(*mode_capabilities, request.target_temp))
+            {
+                if (request.target_temp < mode_capabilities->min_temperature)
+                    request.target_temp = mode_capabilities->min_temperature;
+                else
+                    request.target_temp = mode_capabilities->max_temperature;
+            }
+        
+            // Preserve the requested/current fan mode when it is valid.
+            if (!com2_fan_mode_allowed(*mode_capabilities, request.fanspeed))
+            {
+                // Choose the nearest lower supported manual fan speed first.
+                // This makes Turbo -> Fan resolve to High.
+                switch (request.fanspeed)
+                {
+                case FanMode::Turbo:
+                    if (mode_capabilities->fan_high)
+                        request.fanspeed = FanMode::High;
+                    else if (mode_capabilities->fan_mid)
+                        request.fanspeed = FanMode::Mid;
+                    else if (mode_capabilities->fan_low)
+                        request.fanspeed = FanMode::Low;
+                    else if (mode_capabilities->fan_turbo)
+                        request.fanspeed = FanMode::Turbo;
+                    else
+                        return false;
+                    break;
+        
+                case FanMode::High:
+                    if (mode_capabilities->fan_high)
+                        request.fanspeed = FanMode::High;
+                    else if (mode_capabilities->fan_mid)
+                        request.fanspeed = FanMode::Mid;
+                    else if (mode_capabilities->fan_low)
+                        request.fanspeed = FanMode::Low;
+                    else if (mode_capabilities->fan_turbo)
+                        request.fanspeed = FanMode::Turbo;
+                    else
+                        return false;
+                    break;
+        
+                case FanMode::Mid:
+                    if (mode_capabilities->fan_mid)
+                        request.fanspeed = FanMode::Mid;
+                    else if (mode_capabilities->fan_low)
+                        request.fanspeed = FanMode::Low;
+                    else if (mode_capabilities->fan_high)
+                        request.fanspeed = FanMode::High;
+                    else if (mode_capabilities->fan_turbo)
+                        request.fanspeed = FanMode::Turbo;
+                    else
+                        return false;
+                    break;
+        
+                case FanMode::Low:
+                    if (mode_capabilities->fan_low)
+                        request.fanspeed = FanMode::Low;
+                    else if (mode_capabilities->fan_mid)
+                        request.fanspeed = FanMode::Mid;
+                    else if (mode_capabilities->fan_high)
+                        request.fanspeed = FanMode::High;
+                    else if (mode_capabilities->fan_turbo)
+                        request.fanspeed = FanMode::Turbo;
+                    else
+                        return false;
+                    break;
+        
+                case FanMode::Auto:
+                case FanMode::Unknown:
+                case FanMode::Off:
+                default:
+                    // These are not observed COM2 A0 fan values. Choose a valid
+                    // concrete value rather than allowing encode() to silently
+                    // translate them to Low.
+                    if (mode_capabilities->fan_low)
+                        request.fanspeed = FanMode::Low;
+                    else if (mode_capabilities->fan_mid)
+                        request.fanspeed = FanMode::Mid;
+                    else if (mode_capabilities->fan_high)
+                        request.fanspeed = FanMode::High;
+                    else if (mode_capabilities->fan_turbo)
+                        request.fanspeed = FanMode::Turbo;
+                    else
+                        return false;
+                    break;
+                }
+            }
+        
+            return com2_request_valid(capabilities, request);
+        }
+
         void NonNasaProtocol::publish_request(MessageTarget *target, const std::string &address, ProtocolRequest &request)
         {
 
             if (non_nasa_bus == NonNasaBus::COM2)
             {
+                static const Com2Capabilities com2_capabilities;
                 auto state_it = last_com2_states_.find(address);
 
                 // A COM2 A0 packet contains the complete control state. Do not send
@@ -911,6 +1082,21 @@ namespace esphome
 
                 if (request.swing_mode)
                     LOGW("change swing mode is currently not implemented for COM2");
+
+                if (!resolve_com2_request(com2_capabilities, req))
+                {
+                    LOGW("Unable to resolve safe COM2 control request for %s",
+                         address.c_str());
+                    return;
+                }
+                
+                // This should only be reachable if there is a bug in the resolver.
+                if (!com2_request_valid(com2_capabilities, req))
+                {
+                    LOGE("COM2 resolver produced invalid request for %s",
+                         address.c_str());
+                    return;
+                }
 
                 Com2RequestQueueItem item;
                 item.request = req;

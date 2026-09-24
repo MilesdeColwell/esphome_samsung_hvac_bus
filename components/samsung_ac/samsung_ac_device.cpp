@@ -125,12 +125,7 @@ namespace esphome
       {
         request.fan_mode = customfanmode_to_fanmode(custom_fan.c_str());
       }
-     
-      else if (mode_changed)
-      {
-        FanMode auto_fan = climatefanmode_to_fanmode(climate::CLIMATE_FAN_AUTO);
-        request.fan_mode = auto_fan;
-      }
+
       auto presetOpt = call.get_preset();
       if (presetOpt.has_value())
       {
