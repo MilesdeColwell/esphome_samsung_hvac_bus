@@ -96,16 +96,25 @@ namespace esphome
     {
       const uint32_t now = millis();
 
-      if (id == 0)
-      {
-        LOG_RAW_SEND(now-last_transmission_, data);
-        last_transmission_ = now;
-        this->before_write();
-        this->write_array(data);
-        this->flush();
-        this->after_write();
-        return;
-      }
+    if (id == 0)
+    {
+      LOG_RAW_SEND(now-last_transmission_, data);
+      last_transmission_ = now;
+    
+      this->before_write();
+    
+      const uint32_t tx_start = millis();
+      this->write_array(data);
+      this->flush();
+      const uint32_t tx_end = millis();
+    
+      this->after_write();
+    
+      LOGW("COM2 UART TX completed: duration=%lu ms",
+           (unsigned long)(tx_end - tx_start));
+    
+      return;
+    }
 
       OutgoingData outData;
       outData.id = id;
@@ -141,16 +150,21 @@ namespace esphome
       if (write_data())
         return;
 
-      // Allow device protocols to perform recurring tasks when idle (at most every 20ms)
+        // Allow device protocols to perform recurring tasks when idle.
+        // COM2 timing is sensitive, so check every idle loop.
+        // Other protocols retain the existing 20 ms interval.
       const uint32_t now = millis();
-      if (now - last_protocol_update_ >= 20)
+        
+      if (non_nasa_bus == NonNasaBus::COM2 ||
+            now - last_protocol_update_ >= 20)
       {
-        last_protocol_update_ = now;
-        for (const auto &pair : devices_)
-        {
-          Samsung_AC_Device *device = pair.second;
-          device->protocol_update(this);
-        }
+          last_protocol_update_ = now;
+        
+          for (const auto &pair : devices_)
+          {
+            Samsung_AC_Device *device = pair.second;
+            device->protocol_update(this);
+          }
       }
     }
 
@@ -218,7 +232,11 @@ namespace esphome
           LOGW("Retry sending packet %d", senddata->id);
           senddata->retries++;
         }
-
+        LOGW("UART TX starting: now=%lu, silence=%lu ms, queue=%u",
+            (unsigned long) now,
+            (unsigned long) (now - last_transmission_),
+            (unsigned) send_queue_.size());
+            
         LOG_RAW_SEND(now-last_transmission_,  senddata->data);
 
         last_transmission_ = now;

@@ -156,7 +156,7 @@ namespace esphome
         // the 85 -> 84 C4 response.
         static bool com2_tx_pending_ = false;
         static uint32_t com2_tx_due_ms_ = 0;
-        static constexpr uint32_t COM2_TX_AFTER_85_C4_MS = 180;
+        static constexpr uint32_t COM2_TX_AFTER_20_CMD52_MS = 20;
 
         uint8_t build_checksum(std::vector<uint8_t> &data)
         {
@@ -1265,16 +1265,15 @@ namespace esphome
             // slot following the 85 -> 84 C4 response. For this experiment, use that
             // controller-85 slot instead of injecting during controller 84's phase.
             if (non_nasa_bus == NonNasaBus::COM2 &&
-                nonpacket_.src == "85" &&
-                nonpacket_.dst == "84" &&
-                static_cast<uint8_t>(nonpacket_.cmd) == 0xC4 &&
-                !com2_requests.empty())
-            {
-                com2_tx_pending_ = true;
-                com2_tx_due_ms_ = millis() + COM2_TX_AFTER_85_C4_MS;
-
-                LOGD("COM2 85->84 C4 detected; experimental controller-85 TX scheduled in %lu ms",
-                     static_cast<unsigned long>(COM2_TX_AFTER_85_C4_MS));
+                nonpacket_.src == "20" &&
+                nonpacket_.dst == "85" &&
+                static_cast<uint8_t>(nonpacket_.cmd) == 0x52 &&
+                !com2_requests.empty()) {
+              com2_tx_pending_ = true;
+              com2_tx_due_ms_ = millis() + COM2_TX_AFTER_20_CMD52_MS;
+            
+              LOGD("COM2 20->85 CMD52 detected; controller-85 TX scheduled in %lu ms",
+                   static_cast<unsigned long>(COM2_TX_AFTER_20_CMD52_MS));
             }
 
             target->register_address(nonpacket_.src);
@@ -1563,7 +1562,12 @@ namespace esphome
 
                     LOGD("Sending experimental COM2 control as controller 85 to %s",
                          item.request.dst.c_str());
-
+                    
+                    LOGW("COM2 TX queued: now=%lu, due=%lu, late=%ld ms",
+                        (unsigned long) now,
+                        (unsigned long) com2_tx_due_ms_,
+                        (long) ((int32_t)(now - com2_tx_due_ms_)));
+                        
                     target->publish_data(0, item.request.encode());
 
                     com2_requests.pop_front();
